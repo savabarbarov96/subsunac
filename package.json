@@ -1,20 +1,24 @@
 {
-  "name": "subsunac",
+  "name": "subsunacs-stremio-addon",
   "version": "1.0.0",
   "description": "Stremio addon for Bulgarian subtitles from subsunacs.net",
-  "license": "ISC",
+  "license": "MIT",
   "author": "",
   "type": "commonjs",
   "main": "index.js",
+  "engines": {
+    "node": ">=18.x"
+  },
   "scripts": {
     "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node index.js",
+    "test": "echo \"No tests\" && exit 0"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
     "axios": "^1.13.2",
     "cheerio": "^1.1.2",
-    "express-rate-limit": "^8.2.1",
+    "express": "^4.21.2",
     "stremio-addon-sdk": "^1.6.10"
   }
 }

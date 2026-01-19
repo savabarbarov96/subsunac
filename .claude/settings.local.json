@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:subsunacs.net)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:stremio.github.io)",
+      "WebFetch(domain:forum.kodi.tv)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npm install:*)",
+      "Bash(timeout 5 node:*)",
+      "Bash(timeout 3 node index.js:*)"
+    ]
+  }
+}

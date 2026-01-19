@@ -5,7 +5,9 @@
 const express = require('express');
 const { addonBuilder, getRouter } = require('stremio-addon-sdk');
 const axios = require('axios');
+const https = require('https');
 const AdmZip = require('adm-zip');
+const iconv = require('iconv-lite');
 const path = require('path');
 
 // Import lib modules using path.join for Vercel compatibility
@@ -145,6 +147,112 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Helper function to decode Bulgarian text (typically Windows-1251 encoded)
+function decodeBulgarian(buffer) {
+  // Try to detect if it's already valid UTF-8
+  const utf8Text = buffer.toString('utf8');
+
+  // Check for common UTF-8 BOM or valid Bulgarian UTF-8 characters
+  if (buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
+    return utf8Text; // Has UTF-8 BOM
+  }
+
+  // Check if the text has valid Bulgarian Cyrillic UTF-8 sequences (U+0400-U+04FF range)
+  // Bulgarian letters in UTF-8 are 2-byte sequences: 0xD0/0xD1 followed by 0x80-0xBF
+  const hasBulgarianUtf8 = /[\u0400-\u04FF]/.test(utf8Text);
+  if (hasBulgarianUtf8 && !/\uFFFD/.test(utf8Text)) {
+    return utf8Text; // Valid UTF-8 with Cyrillic
+  }
+
+  // Otherwise, decode as Windows-1251 (common Bulgarian encoding)
+  try {
+    return iconv.decode(buffer, 'win1251');
+  } catch (e) {
+    // Fallback to UTF-8
+    return utf8Text;
+  }
+}
+
+// Helper function to fetch subtitle using native https (handles malformed server responses)
+function fetchSubtitle(subtitleId) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'subsunacs.net',
+      path: `/getentry.php?id=${subtitleId}&ei=0`,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://subsunacs.net',
+        'Accept': '*/*'
+      },
+      // Required for subsunacs.net which returns malformed HTTP responses
+      insecureHTTPParser: true
+    };
+
+    let resolved = false;
+    const chunks = [];
+    let responseHeaders = {};
+    let statusCode = 0;
+
+    const req = https.request(options, (response) => {
+      responseHeaders = response.headers;
+      statusCode = response.statusCode;
+
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        if (!resolved) {
+          resolved = true;
+          resolve({
+            data: Buffer.concat(chunks),
+            headers: responseHeaders,
+            statusCode: statusCode
+          });
+        }
+      });
+
+      // Handle errors on the response stream - the server sends malformed data
+      // that triggers parse errors, but we may already have the subtitle content
+      response.on('error', (err) => {
+        if (!resolved && chunks.length > 0) {
+          resolved = true;
+          resolve({
+            data: Buffer.concat(chunks),
+            headers: responseHeaders,
+            statusCode: statusCode
+          });
+        }
+      });
+    });
+
+    // Handle request-level errors - but if we got data, use it
+    req.on('error', (err) => {
+      if (!resolved) {
+        if (chunks.length > 0) {
+          resolved = true;
+          resolve({
+            data: Buffer.concat(chunks),
+            headers: responseHeaders,
+            statusCode: statusCode
+          });
+        } else {
+          resolved = true;
+          reject(err);
+        }
+      }
+    });
+
+    req.setTimeout(25000, () => {
+      if (!resolved) {
+        req.destroy();
+        resolved = true;
+        reject(new Error('Request timeout'));
+      }
+    });
+
+    req.end();
+  });
+}
+
 // Subtitle proxy endpoint - must be before addon router
 app.get('/subtitle/:id.srt', async (req, res) => {
   const subtitleId = req.params.id;
@@ -157,26 +265,14 @@ app.get('/subtitle/:id.srt', async (req, res) => {
   console.log(`[Proxy] Fetching subtitle ID: ${subtitleId}`);
 
   try {
-    const downloadUrl = `https://subsunacs.net/getentry.php?id=${subtitleId}&ei=0`;
-
-    const response = await axios.get(downloadUrl, {
-      responseType: 'arraybuffer',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://subsunacs.net',
-        'Accept': '*/*'
-      },
-      timeout: 25000,
-      maxRedirects: 5
-    });
-
+    const response = await fetchSubtitle(subtitleId);
     const contentType = response.headers['content-type'] || '';
-    const buffer = Buffer.from(response.data);
+    const buffer = response.data;
 
     // Check for ZIP magic bytes (PK)
     const isZip = buffer.length > 2 && buffer[0] === 0x50 && buffer[1] === 0x4B;
 
-    if (isZip || contentType.includes('zip') || contentType.includes('octet-stream')) {
+    if (isZip) {
       try {
         const zip = new AdmZip(buffer);
         const zipEntries = zip.getEntries();
@@ -187,7 +283,7 @@ app.get('/subtitle/:id.srt', async (req, res) => {
         );
 
         if (srtEntry) {
-          const subtitleContent = srtEntry.getData().toString('utf8');
+          const subtitleContent = decodeBulgarian(srtEntry.getData());
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.send(subtitleContent);
@@ -201,7 +297,7 @@ app.get('/subtitle/:id.srt', async (req, res) => {
         );
 
         if (subEntry) {
-          const subtitleContent = subEntry.getData().toString('utf8');
+          const subtitleContent = decodeBulgarian(subEntry.getData());
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.send(subtitleContent);
@@ -216,13 +312,13 @@ app.get('/subtitle/:id.srt', async (req, res) => {
         // Maybe it's not actually a ZIP, try serving raw
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.send(buffer.toString('utf8'));
+        res.send(decodeBulgarian(buffer));
       }
     } else {
-      // Serve as plain text
+      // Serve as plain text (handles raw .srt or .sub files)
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.send(buffer.toString('utf8'));
+      res.send(decodeBulgarian(buffer));
       console.log(`[Proxy] Served subtitle ${subtitleId} directly`);
     }
   } catch (error) {

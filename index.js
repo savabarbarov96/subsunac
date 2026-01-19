@@ -49,7 +49,7 @@ builder.defineSubtitlesHandler(async (args) => {
 
     let imdbInfo;
     try {
-      imdbInfo = await getIMDBInfo(parsed.imdbId);
+      imdbInfo = await getIMDBInfo(parsed.imdbId, parsed.type);
       console.log(`[Addon] IMDB Info:`, imdbInfo);
     } catch (error) {
       console.error(`[Addon] Failed to get IMDB info:`, error.message);

@@ -17,7 +17,7 @@ async function testIMDB() {
     console.log('✓ The Matrix:', matrixInfo);
 
     // Test with Breaking Bad (series)
-    const breakingBadInfo = await getIMDBInfo('tt0903747');
+    const breakingBadInfo = await getIMDBInfo('tt0903747', 'series');
     console.log('✓ Breaking Bad:', breakingBadInfo);
 
   } catch (error) {

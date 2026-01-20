@@ -44,12 +44,14 @@ function getBaseUrl(req) {
 // Define addon manifest
 const manifest = {
   id: 'org.stremio.subsunacs',
-  version: '1.0.0',
+  version: '1.0.1',
   name: 'Subsunacs Bulgarian Subtitles',
-  description: 'Bulgarian subtitles from subsunacs.net',
+  description: 'Bulgarian subtitles from subsunacs.net by Saviero Montana',
   logo: 'https://flagcdn.com/w320/bg.png',
   background: 'https://flagcdn.com/w1280/bg.png',
-  resources: ['subtitles'],
+  resources: [
+    { name: 'subtitles', types: ['movie', 'series'], idPrefixes: ['tt'] }
+  ],
   types: ['movie', 'series'],
   idPrefixes: ['tt'],
   catalogs: [],
@@ -101,7 +103,8 @@ builder.defineSubtitlesHandler(async (args) => {
 
     const subtitles = searchResults.map((result, index) => {
       const id = `subsunacs-${result.id}-${index}`;
-      const url = `${currentBaseUrl}/subtitle/${result.id}.srt`;
+      const directUrl = `${currentBaseUrl}/subtitle/${result.id}.srt`;
+      const url = `http://127.0.0.1:11470/subtitles.vtt?from=${encodeURIComponent(directUrl)}`;
 
       let subtitleLabel = result.title;
       if (result.fps) {

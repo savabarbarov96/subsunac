@@ -287,7 +287,7 @@ router.get('/health', (req, res) => {
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     version: manifest.version,
-    providers: ['subsunacs', 'yavka', 'subsab']
+    providers: ['subsunacs', 'subsab']
   });
 });
 
@@ -300,7 +300,7 @@ router.get('/subtitle/:provider/:id.srt', async (req, res) => {
     return res.status(400).send('Invalid subtitle ID');
   }
 
-  const validProviders = ['subsunacs', 'yavka', 'subsab'];
+  const validProviders = ['subsunacs', 'subsab'];
   if (!validProviders.includes(provider)) {
     return res.status(400).send('Invalid provider');
   }
@@ -327,17 +327,8 @@ router.get('/subtitle/:provider/:id.srt', async (req, res) => {
         break;
       }
 
-      case 'yavka': {
-        const yavkaProvider = getProvider('yavka');
-        if (!yavkaProvider) {
-          return res.status(500).send('Yavka provider not available');
-        }
-        buffer = await yavkaProvider.downloadSubtitle(subtitleId);
-        break;
-      }
-
       case 'subsab': {
-        const downloadUrl = `http://subs.sab.bz/index.php?act=download&id=${subtitleId}`;
+        const downloadUrl = `http://subs.sab.bz/index.php?act=download&attach_id=${subtitleId}`;
         const response = await axios.get(downloadUrl, {
           responseType: 'arraybuffer',
           headers: {
@@ -382,7 +373,7 @@ serveHTTP(addonInterface, {
 console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║   Bulgarian Subtitles Addon for Stremio                  ║
-║   Providers: Subsunacs, Yavka, SubsSab                   ║
+║   Providers: Subsunacs, SubsSab                          ║
 ╚═══════════════════════════════════════════════════════════╝
 
 Addon is running at:

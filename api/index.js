@@ -145,7 +145,7 @@ app.get('/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     version: manifest.version,
-    providers: ['subsunacs', 'yavka', 'subsab']
+    providers: ['subsunacs', 'subsab']
   });
 });
 
@@ -412,7 +412,7 @@ function fetchSubsSab(subtitleId) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'subs.sab.bz',
-      path: `/index.php?act=download&id=${subtitleId}`,
+      path: `/index.php?act=download&attach_id=${subtitleId}`,
       method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -519,7 +519,7 @@ app.get('/subtitle/:provider/:id.srt', async (req, res) => {
   }
 
   // Validate provider
-  const validProviders = ['subsunacs', 'yavka', 'subsab'];
+  const validProviders = ['subsunacs', 'subsab'];
   if (!validProviders.includes(provider)) {
     return res.status(400).send('Invalid provider');
   }
@@ -532,10 +532,6 @@ app.get('/subtitle/:provider/:id.srt', async (req, res) => {
     switch (provider) {
       case 'subsunacs':
         response = await fetchSubsunacs(subtitleId);
-        break;
-
-      case 'yavka':
-        response = await fetchYavka(subtitleId);
         break;
 
       case 'subsab':

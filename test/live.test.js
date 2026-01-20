@@ -37,7 +37,8 @@ test('live deployment returns subtitles with stable base URL', { skip: SKIP_LIVE
 
   // Verify the new URL pattern includes provider
   // Pattern: /subtitle/:provider/:id.srt
-  assert.match(fromUrl.pathname, /^\/subtitle\/(subsunacs|yavka|subsab)\/\d+\.srt$/);
+  // Note: yavka is disabled due to Cloudflare protection
+  assert.match(fromUrl.pathname, /^\/subtitle\/(subsunacs|subsab)\/\d+\.srt$/);
 });
 
 test('live deployment returns subtitles with provider prefixes', { skip: SKIP_LIVE ? 'SKIP_LIVE_TESTS=1' : false }, async () => {
@@ -49,10 +50,10 @@ test('live deployment returns subtitles with provider prefixes', { skip: SKIP_LI
   assert.ok(payload.subtitles.length > 0);
 
   // Check that subtitle titles have provider prefixes
+  // Note: yavka is disabled due to Cloudflare protection
   const hasProviderPrefix = payload.subtitles.some(sub =>
     sub.title && (
       sub.title.startsWith('[Subsunacs]') ||
-      sub.title.startsWith('[Yavka]') ||
       sub.title.startsWith('[SubsSab]')
     )
   );
@@ -87,6 +88,6 @@ test('live health check returns providers list', { skip: SKIP_LIVE ? 'SKIP_LIVE_
   assert.equal(data.status, 'ok');
   assert.ok(Array.isArray(data.providers));
   assert.ok(data.providers.includes('subsunacs'));
-  assert.ok(data.providers.includes('yavka'));
+  // Note: yavka is disabled due to Cloudflare protection
   assert.ok(data.providers.includes('subsab'));
 });

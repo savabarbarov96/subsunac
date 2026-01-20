@@ -16,7 +16,7 @@ test('subsab search function exists', () => {
 
 test('subsab getDownloadUrl returns correct URL', () => {
   const url = subsab.getDownloadUrl('12345');
-  assert.equal(url, 'http://subs.sab.bz/index.php?act=download&id=12345');
+  assert.equal(url, 'http://subs.sab.bz/index.php?act=download&attach_id=12345');
 });
 
 test('subsab downloadSubtitle function exists', () => {

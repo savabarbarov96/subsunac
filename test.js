@@ -8,7 +8,8 @@
 const { getIMDBInfo } = require('./lib/imdb');
 const { searchAllProviders } = require('./lib/providers');
 const subsunacs = require('./lib/providers/subsunacs');
-const yavka = require('./lib/providers/yavka');
+// NOTE: Yavka is disabled due to Cloudflare bot protection
+// const yavka = require('./lib/providers/yavka');
 const subsab = require('./lib/providers/subsab');
 const { parseStremioId } = require('./lib/utils');
 
@@ -47,23 +48,24 @@ async function testSubsunacs() {
   }
 }
 
-async function testYavka() {
-  console.log('\n=== Testing Yavka Provider ===');
-
-  try {
-    const results = await yavka.search('The Matrix', 1999, null, null, 'tt0133093');
-    console.log(`✓ Found ${results.length} subtitles`);
-    if (results.length > 0) {
-      console.log('  First result:', {
-        provider: results[0].provider,
-        title: results[0].title,
-        id: results[0].id
-      });
-    }
-  } catch (error) {
-    console.error('✗ Yavka test failed:', error.message);
-  }
-}
+// NOTE: Yavka is disabled due to Cloudflare bot protection
+// async function testYavka() {
+//   console.log('\n=== Testing Yavka Provider ===');
+//
+//   try {
+//     const results = await yavka.search('The Matrix', 1999, null, null, 'tt0133093');
+//     console.log(`✓ Found ${results.length} subtitles`);
+//     if (results.length > 0) {
+//       console.log('  First result:', {
+//         provider: results[0].provider,
+//         title: results[0].title,
+//         id: results[0].id
+//       });
+//     }
+//   } catch (error) {
+//     console.error('✗ Yavka test failed:', error.message);
+//   }
+// }
 
 async function testSubsSab() {
   console.log('\n=== Testing SubsSab Provider ===');
@@ -116,12 +118,12 @@ async function testUtils() {
 
 async function runTests() {
   console.log('Starting Bulgarian Subtitles Addon Tests...');
-  console.log('Providers: Subsunacs, Yavka, SubsSab\n');
+  console.log('Providers: Subsunacs, SubsSab (Yavka disabled - Cloudflare protected)\n');
 
   testUtils();
   await testIMDB();
   await testSubsunacs();
-  await testYavka();
+  // await testYavka();  // Disabled: Cloudflare protected
   await testSubsSab();
   await testAllProviders();
 

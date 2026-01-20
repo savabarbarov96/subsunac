@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * Stremio Addon for Subsunacs Bulgarian Subtitles
+ * Bulgarian Subtitles Stremio Addon
+ * Supports multiple providers: Subsunacs, Yavka, SubsSab
  *
  * Local development server. For production, use Vercel deployment.
  */
@@ -9,10 +10,31 @@
 const express = require('express');
 const { addonBuilder, serveHTTP, getRouter } = require('stremio-addon-sdk');
 const { getIMDBInfo } = require('./lib/imdb');
-const { searchSubtitles } = require('./lib/subsunacs');
+const { searchAllProviders, getProvider } = require('./lib/providers');
 const { parseStremioId } = require('./lib/utils');
 const axios = require('axios');
+const http = require('http');
 const AdmZip = require('adm-zip');
+const iconv = require('iconv-lite');
+
+function decodeBulgarian(buffer) {
+  const utf8Text = buffer.toString('utf8');
+
+  if (buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
+    return utf8Text;
+  }
+
+  const hasBulgarianUtf8 = /[\u0400-\u04FF]/.test(utf8Text);
+  if (hasBulgarianUtf8 && !/\uFFFD/.test(utf8Text)) {
+    return utf8Text;
+  }
+
+  try {
+    return iconv.decode(buffer, 'win1251');
+  } catch (e) {
+    return utf8Text;
+  }
+}
 
 function formatSrtTime(totalSeconds) {
   const totalMs = Math.max(0, Math.round(totalSeconds * 1000));
@@ -81,6 +103,77 @@ function convertMicroDvdToSrt(text) {
   return `${output.join('\n').trim()}\n`;
 }
 
+function processSubtitleBuffer(buffer, res, subtitleId) {
+  const isZip = buffer.length > 2 && buffer[0] === 0x50 && buffer[1] === 0x4B;
+
+  if (isZip) {
+    try {
+      const zip = new AdmZip(buffer);
+      const zipEntries = zip.getEntries();
+
+      const srtEntry = zipEntries.find(entry =>
+        !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.srt')
+      );
+
+      if (srtEntry) {
+        const subtitleContent = decodeBulgarian(srtEntry.getData());
+        res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.send(subtitleContent);
+        console.log(`[Proxy] Served subtitle ${subtitleId} from ZIP`);
+        return true;
+      }
+
+      const subEntry = zipEntries.find(entry =>
+        !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.sub')
+      );
+
+      if (subEntry) {
+        const subtitleContent = decodeBulgarian(subEntry.getData());
+        const converted = convertMicroDvdToSrt(subtitleContent);
+        res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.send(converted || subtitleContent);
+        console.log(`[Proxy] Served .sub subtitle ${subtitleId} from ZIP`);
+        return true;
+      }
+
+      const txtEntry = zipEntries.find(entry =>
+        !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.txt')
+      );
+
+      if (txtEntry) {
+        const subtitleContent = decodeBulgarian(txtEntry.getData());
+        const converted = convertMicroDvdToSrt(subtitleContent);
+        res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.send(converted || subtitleContent);
+        console.log(`[Proxy] Served .txt subtitle ${subtitleId} from ZIP`);
+        return true;
+      }
+
+      console.error(`[Proxy] No subtitle file found in ZIP for ${subtitleId}`);
+      return false;
+    } catch (zipError) {
+      console.error(`[Proxy] ZIP extraction error:`, zipError.message);
+      const decoded = decodeBulgarian(buffer);
+      const converted = convertMicroDvdToSrt(decoded);
+      res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.send(converted || decoded);
+      return true;
+    }
+  } else {
+    const decoded = decodeBulgarian(buffer);
+    const converted = convertMicroDvdToSrt(decoded);
+    res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(converted || decoded);
+    console.log(`[Proxy] Served subtitle ${subtitleId} directly`);
+    return true;
+  }
+}
+
 // Environment configuration
 const PORT = process.env.PORT || 7000;
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
@@ -88,9 +181,9 @@ const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 // Define addon manifest
 const manifest = {
   id: 'org.stremio.subsunacs',
-  version: '1.0.1',
-  name: 'Subsunacs Bulgarian Subtitles',
-  description: 'Bulgarian subtitles from subsunacs.net by Saviero Montana',
+  version: '2.0.0',
+  name: 'Bulgarian Subtitles',
+  description: 'Bulgarian subtitles from multiple providers (Subsunacs, Yavka, SubsSab)',
   logo: 'https://flagcdn.com/w320/bg.png',
   background: 'https://flagcdn.com/w1280/bg.png',
   resources: [
@@ -125,15 +218,23 @@ builder.defineSubtitlesHandler(async (args) => {
       return { subtitles: [] };
     }
 
+    // Search all providers in parallel
     let searchResults;
     if (parsed.type === 'movie') {
-      searchResults = await searchSubtitles(imdbInfo.title, imdbInfo.year);
+      searchResults = await searchAllProviders(
+        imdbInfo.title,
+        imdbInfo.year,
+        null,
+        null,
+        parsed.imdbId
+      );
     } else {
-      searchResults = await searchSubtitles(
+      searchResults = await searchAllProviders(
         imdbInfo.title,
         imdbInfo.year,
         parsed.season,
-        parsed.episode
+        parsed.episode,
+        parsed.imdbId
       );
     }
 
@@ -143,10 +244,12 @@ builder.defineSubtitlesHandler(async (args) => {
     }
 
     const subtitles = searchResults.map((result, index) => {
-      const id = `subsunacs-${result.id}-${index}`;
-      const url = `${PUBLIC_URL}/subtitle/${result.id}.srt`;
+      const id = `${result.provider}-${result.id}-${index}`;
+      // New URL pattern includes provider
+      const url = `${PUBLIC_URL}/subtitle/${result.provider}/${result.id}.srt`;
 
-      let subtitleLabel = result.title;
+      // Build subtitle label with provider prefix
+      let subtitleLabel = `[${result.providerName}] ${result.title}`;
       if (result.fps) {
         subtitleLabel += ` [${result.fps}fps]`;
       }
@@ -158,11 +261,11 @@ builder.defineSubtitlesHandler(async (args) => {
         id: id,
         url: url,
         lang: 'bul',
-        ...(subtitleLabel !== result.title && { title: subtitleLabel })
+        title: subtitleLabel
       };
     });
 
-    console.log(`[Addon] Returning ${subtitles.length} subtitle(s)`);
+    console.log(`[Addon] Returning ${subtitles.length} subtitle(s) from all providers`);
     return { subtitles };
 
   } catch (error) {
@@ -183,92 +286,89 @@ router.get('/health', (req, res) => {
     status: 'ok',
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
-    version: manifest.version
+    version: manifest.version,
+    providers: ['subsunacs', 'yavka', 'subsab']
   });
 });
 
-// Subtitle proxy endpoint
-router.get('/subtitle/:id.srt', async (req, res) => {
-  const subtitleId = req.params.id;
+// Subtitle proxy endpoint - supports multiple providers
+// URL pattern: /subtitle/:provider/:id.srt
+router.get('/subtitle/:provider/:id.srt', async (req, res) => {
+  const { provider, id: subtitleId } = req.params;
 
   if (!/^\d+$/.test(subtitleId)) {
     return res.status(400).send('Invalid subtitle ID');
   }
 
-  console.log(`[Proxy] Fetching subtitle ID: ${subtitleId}`);
+  const validProviders = ['subsunacs', 'yavka', 'subsab'];
+  if (!validProviders.includes(provider)) {
+    return res.status(400).send('Invalid provider');
+  }
+
+  console.log(`[Proxy] Fetching subtitle ID: ${subtitleId} from ${provider}`);
 
   try {
-    const downloadUrl = `https://subsunacs.net/getentry.php?id=${subtitleId}&ei=0`;
+    let buffer;
 
-    const response = await axios.get(downloadUrl, {
-      responseType: 'arraybuffer',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://subsunacs.net',
-        'Accept': '*/*'
-      },
-      timeout: 25000,
-      maxRedirects: 5
-    });
-
-    const contentType = response.headers['content-type'] || '';
-    const buffer = Buffer.from(response.data);
-
-    // Check for ZIP magic bytes (PK)
-    const isZip = buffer.length > 2 && buffer[0] === 0x50 && buffer[1] === 0x4B;
-
-    if (isZip || contentType.includes('zip') || contentType.includes('octet-stream')) {
-      try {
-        const zip = new AdmZip(buffer);
-        const zipEntries = zip.getEntries();
-
-        const srtEntry = zipEntries.find(entry =>
-          !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.srt')
-        );
-
-        if (srtEntry) {
-          const subtitleContent = srtEntry.getData().toString('utf8');
-          res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.send(subtitleContent);
-          console.log(`[Proxy] Served subtitle ${subtitleId} from ZIP`);
-          return;
-        }
-
-        const subEntry = zipEntries.find(entry =>
-          !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.sub')
-        );
-
-        if (subEntry) {
-          const subtitleContent = subEntry.getData().toString('utf8');
-          const converted = convertMicroDvdToSrt(subtitleContent);
-          res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.send(converted || subtitleContent);
-          console.log(`[Proxy] Served .sub subtitle ${subtitleId} from ZIP`);
-          return;
-        }
-
-        console.error(`[Proxy] No subtitle file found in ZIP for ${subtitleId}`);
-        res.status(404).send('Subtitle file not found in archive');
-      } catch (zipError) {
-        console.error(`[Proxy] ZIP extraction error:`, zipError.message);
-        const decoded = buffer.toString('utf8');
-        const converted = convertMicroDvdToSrt(decoded);
-        res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.send(converted || decoded);
+    switch (provider) {
+      case 'subsunacs': {
+        const downloadUrl = `https://subsunacs.net/getentry.php?id=${subtitleId}&ei=0`;
+        const response = await axios.get(downloadUrl, {
+          responseType: 'arraybuffer',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://subsunacs.net',
+            'Accept': '*/*'
+          },
+          timeout: 25000,
+          maxRedirects: 5
+        });
+        buffer = Buffer.from(response.data);
+        break;
       }
-    } else {
-      const decoded = buffer.toString('utf8');
-      const converted = convertMicroDvdToSrt(decoded);
-      res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.send(converted || decoded);
-      console.log(`[Proxy] Served subtitle ${subtitleId} directly`);
+
+      case 'yavka': {
+        const yavkaProvider = getProvider('yavka');
+        if (!yavkaProvider) {
+          return res.status(500).send('Yavka provider not available');
+        }
+        buffer = await yavkaProvider.downloadSubtitle(subtitleId);
+        break;
+      }
+
+      case 'subsab': {
+        const downloadUrl = `http://subs.sab.bz/index.php?act=download&id=${subtitleId}`;
+        const response = await axios.get(downloadUrl, {
+          responseType: 'arraybuffer',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'http://subs.sab.bz',
+            'Accept': '*/*'
+          },
+          timeout: 25000,
+          maxRedirects: 5,
+          httpAgent: new http.Agent({ keepAlive: true })
+        });
+        buffer = Buffer.from(response.data);
+        break;
+      }
+
+      default:
+        return res.status(400).send('Unknown provider');
     }
+
+    if (!buffer || buffer.length === 0) {
+      console.error(`[Proxy] Empty response from ${provider} for ${subtitleId}`);
+      return res.status(404).send('Subtitle not found');
+    }
+
+    const success = processSubtitleBuffer(buffer, res, subtitleId);
+    if (!success) {
+      res.status(404).send('Subtitle file not found in archive');
+    }
+
   } catch (error) {
-    console.error(`[Proxy] Error fetching subtitle ${subtitleId}:`, error.message);
+    console.error(`[Proxy] Error fetching subtitle ${subtitleId} from ${provider}:`, error.message);
     res.status(500).send('Error fetching subtitle');
   }
 });
@@ -281,7 +381,8 @@ serveHTTP(addonInterface, {
 
 console.log(`
 ╔═══════════════════════════════════════════════════════════╗
-║   Subsunacs Bulgarian Subtitles Addon for Stremio        ║
+║   Bulgarian Subtitles Addon for Stremio                  ║
+║   Providers: Subsunacs, Yavka, SubsSab                   ║
 ╚═══════════════════════════════════════════════════════════╝
 
 Addon is running at:

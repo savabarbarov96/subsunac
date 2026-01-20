@@ -34,13 +34,59 @@ test('live deployment returns subtitles with stable base URL', { skip: SKIP_LIVE
   const fromUrl = new URL(from);
   const liveHost = new URL(LIVE_URL).hostname;
   assert.equal(fromUrl.hostname, liveHost);
+
+  // Verify the new URL pattern includes provider
+  // Pattern: /subtitle/:provider/:id.srt
+  assert.match(fromUrl.pathname, /^\/subtitle\/(subsunacs|yavka|subsab)\/\d+\.srt$/);
 });
 
-test('live deployment serves an SRT file', { skip: SKIP_LIVE ? 'SKIP_LIVE_TESTS=1' : false }, async () => {
-  const response = await fetch(`${LIVE_URL}/subtitle/94087.srt`);
+test('live deployment returns subtitles with provider prefixes', { skip: SKIP_LIVE ? 'SKIP_LIVE_TESTS=1' : false }, async () => {
+  const response = await fetch(`${LIVE_URL}/subtitles/movie/tt0133093.json`);
+  assert.equal(response.status, 200);
+
+  const payload = await response.json();
+  assert.ok(Array.isArray(payload.subtitles));
+  assert.ok(payload.subtitles.length > 0);
+
+  // Check that subtitle titles have provider prefixes
+  const hasProviderPrefix = payload.subtitles.some(sub =>
+    sub.title && (
+      sub.title.startsWith('[Subsunacs]') ||
+      sub.title.startsWith('[Yavka]') ||
+      sub.title.startsWith('[SubsSab]')
+    )
+  );
+  assert.ok(hasProviderPrefix, 'At least one subtitle should have a provider prefix');
+});
+
+test('live deployment serves an SRT file from subsunacs', { skip: SKIP_LIVE ? 'SKIP_LIVE_TESTS=1' : false }, async () => {
+  // Use the new URL pattern: /subtitle/:provider/:id.srt
+  const response = await fetch(`${LIVE_URL}/subtitle/subsunacs/94087.srt`);
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type') || '', /subrip/i);
 
   const text = await response.text();
   assert.match(text, /\d+\s*\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}/);
+});
+
+test('live deployment rejects invalid provider', { skip: SKIP_LIVE ? 'SKIP_LIVE_TESTS=1' : false }, async () => {
+  const response = await fetch(`${LIVE_URL}/subtitle/invalidprovider/12345.srt`);
+  assert.equal(response.status, 400);
+});
+
+test('live deployment rejects invalid subtitle ID', { skip: SKIP_LIVE ? 'SKIP_LIVE_TESTS=1' : false }, async () => {
+  const response = await fetch(`${LIVE_URL}/subtitle/subsunacs/invalid.srt`);
+  assert.equal(response.status, 400);
+});
+
+test('live health check returns providers list', { skip: SKIP_LIVE ? 'SKIP_LIVE_TESTS=1' : false }, async () => {
+  const response = await fetch(`${LIVE_URL}/health`);
+  assert.equal(response.status, 200);
+
+  const data = await response.json();
+  assert.equal(data.status, 'ok');
+  assert.ok(Array.isArray(data.providers));
+  assert.ok(data.providers.includes('subsunacs'));
+  assert.ok(data.providers.includes('yavka'));
+  assert.ok(data.providers.includes('subsab'));
 });

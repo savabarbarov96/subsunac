@@ -1,18 +1,19 @@
 /**
- * Vercel Serverless Function for Subsunacs Stremio Addon
+ * Vercel Serverless Function for Bulgarian Subtitles Stremio Addon
+ * Supports multiple providers: Subsunacs, Yavka, SubsSab
  */
 
 const express = require('express');
 const { addonBuilder, getRouter } = require('stremio-addon-sdk');
-const axios = require('axios');
 const https = require('https');
+const http = require('http');
 const AdmZip = require('adm-zip');
 const iconv = require('iconv-lite');
 const path = require('path');
 
 // Import lib modules using path.join for Vercel compatibility
 const { getIMDBInfo } = require(path.join(__dirname, '..', 'lib', 'imdb'));
-const { searchSubtitles } = require(path.join(__dirname, '..', 'lib', 'subsunacs'));
+const { searchAllProviders, getProvider } = require(path.join(__dirname, '..', 'lib', 'providers'));
 const { parseStremioId } = require(path.join(__dirname, '..', 'lib', 'utils'));
 const { getBaseUrl } = require(path.join(__dirname, '..', 'lib', 'base-url'));
 
@@ -32,9 +33,9 @@ app.use((req, res, next) => {
 // Define addon manifest
 const manifest = {
   id: 'org.stremio.subsunacs',
-  version: '1.0.1',
-  name: 'Subsunacs Bulgarian Subtitles',
-  description: 'Bulgarian subtitles from subsunacs.net by Saviero Montana',
+  version: '2.0.0',
+  name: 'Bulgarian Subtitles',
+  description: 'Bulgarian subtitles from multiple providers (Subsunacs, Yavka, SubsSab)',
   logo: 'https://flagcdn.com/w320/bg.png',
   background: 'https://flagcdn.com/w1280/bg.png',
   resources: [
@@ -72,15 +73,23 @@ builder.defineSubtitlesHandler(async (args) => {
       return { subtitles: [] };
     }
 
+    // Search all providers in parallel
     let searchResults;
     if (parsed.type === 'movie') {
-      searchResults = await searchSubtitles(imdbInfo.title, imdbInfo.year);
+      searchResults = await searchAllProviders(
+        imdbInfo.title,
+        imdbInfo.year,
+        null,
+        null,
+        parsed.imdbId
+      );
     } else {
-      searchResults = await searchSubtitles(
+      searchResults = await searchAllProviders(
         imdbInfo.title,
         imdbInfo.year,
         parsed.season,
-        parsed.episode
+        parsed.episode,
+        parsed.imdbId
       );
     }
 
@@ -90,10 +99,12 @@ builder.defineSubtitlesHandler(async (args) => {
     }
 
     const subtitles = searchResults.map((result, index) => {
-      const id = `subsunacs-${result.id}-${index}`;
-      const url = `${currentBaseUrl}/subtitle/${result.id}.srt`;
+      const id = `${result.provider}-${result.id}-${index}`;
+      // New URL pattern includes provider
+      const url = `${currentBaseUrl}/subtitle/${result.provider}/${result.id}.srt`;
 
-      let subtitleLabel = result.title;
+      // Build subtitle label with provider prefix
+      let subtitleLabel = `[${result.providerName}] ${result.title}`;
       if (result.fps) {
         subtitleLabel += ` [${result.fps}fps]`;
       }
@@ -105,11 +116,11 @@ builder.defineSubtitlesHandler(async (args) => {
         id: id,
         url: url,
         lang: 'bul',
-        ...(subtitleLabel !== result.title && { title: subtitleLabel })
+        title: subtitleLabel
       };
     });
 
-    console.log(`[Addon] Returning ${subtitles.length} subtitle(s)`);
+    console.log(`[Addon] Returning ${subtitles.length} subtitle(s) from all providers`);
     return { subtitles };
 
   } catch (error) {
@@ -133,7 +144,8 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    version: manifest.version
+    version: manifest.version,
+    providers: ['subsunacs', 'yavka', 'subsab']
   });
 });
 
@@ -230,8 +242,86 @@ function convertMicroDvdToSrt(text) {
   return `${output.join('\n').trim()}\n`;
 }
 
-// Helper function to fetch subtitle using native https (handles malformed server responses)
-function fetchSubtitle(subtitleId) {
+// Helper function to extract and process subtitle from buffer
+function processSubtitleBuffer(buffer, res, subtitleId) {
+  // Check for ZIP magic bytes (PK)
+  const isZip = buffer.length > 2 && buffer[0] === 0x50 && buffer[1] === 0x4B;
+
+  if (isZip) {
+    try {
+      const zip = new AdmZip(buffer);
+      const zipEntries = zip.getEntries();
+
+      // Find .srt file
+      const srtEntry = zipEntries.find(entry =>
+        !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.srt')
+      );
+
+      if (srtEntry) {
+        const subtitleContent = decodeBulgarian(srtEntry.getData());
+        res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.send(subtitleContent);
+        console.log(`[Proxy] Served subtitle ${subtitleId} from ZIP`);
+        return true;
+      }
+
+      // Try .sub file if no .srt found
+      const subEntry = zipEntries.find(entry =>
+        !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.sub')
+      );
+
+      if (subEntry) {
+        const subtitleContent = decodeBulgarian(subEntry.getData());
+        const converted = convertMicroDvdToSrt(subtitleContent);
+        res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.send(converted || subtitleContent);
+        console.log(`[Proxy] Served .sub subtitle ${subtitleId} from ZIP`);
+        return true;
+      }
+
+      // Try .txt file (sometimes used for subtitles)
+      const txtEntry = zipEntries.find(entry =>
+        !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.txt')
+      );
+
+      if (txtEntry) {
+        const subtitleContent = decodeBulgarian(txtEntry.getData());
+        const converted = convertMicroDvdToSrt(subtitleContent);
+        res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.send(converted || subtitleContent);
+        console.log(`[Proxy] Served .txt subtitle ${subtitleId} from ZIP`);
+        return true;
+      }
+
+      console.error(`[Proxy] No subtitle file found in ZIP for ${subtitleId}`);
+      return false;
+    } catch (zipError) {
+      console.error(`[Proxy] ZIP extraction error:`, zipError.message);
+      // Maybe it's not actually a ZIP, try serving raw
+      const decoded = decodeBulgarian(buffer);
+      const converted = convertMicroDvdToSrt(decoded);
+      res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.send(converted || decoded);
+      return true;
+    }
+  } else {
+    // Serve as plain text (handles raw .srt or .sub files)
+    const decoded = decodeBulgarian(buffer);
+    const converted = convertMicroDvdToSrt(decoded);
+    res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(converted || decoded);
+    console.log(`[Proxy] Served subtitle ${subtitleId} directly`);
+    return true;
+  }
+}
+
+// Fetch subtitle from Subsunacs using native https (handles malformed server responses)
+function fetchSubsunacs(subtitleId) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'subsunacs.net',
@@ -242,7 +332,6 @@ function fetchSubtitle(subtitleId) {
         'Referer': 'https://subsunacs.net',
         'Accept': '*/*'
       },
-      // Required for subsunacs.net which returns malformed HTTP responses
       insecureHTTPParser: true
     };
 
@@ -267,8 +356,6 @@ function fetchSubtitle(subtitleId) {
         }
       });
 
-      // Handle errors on the response stream - the server sends malformed data
-      // that triggers parse errors, but we may already have the subtitle content
       response.on('error', (err) => {
         if (!resolved && chunks.length > 0) {
           resolved = true;
@@ -281,7 +368,6 @@ function fetchSubtitle(subtitleId) {
       });
     });
 
-    // Handle request-level errors - but if we got data, use it
     req.on('error', (err) => {
       if (!resolved) {
         if (chunks.length > 0) {
@@ -310,81 +396,170 @@ function fetchSubtitle(subtitleId) {
   });
 }
 
-// Subtitle proxy endpoint - must be before addon router
-app.get('/subtitle/:id.srt', async (req, res) => {
-  const subtitleId = req.params.id;
+// Fetch subtitle from Yavka
+async function fetchYavka(subtitleId) {
+  const provider = getProvider('yavka');
+  if (!provider) {
+    throw new Error('Yavka provider not found');
+  }
+
+  const buffer = await provider.downloadSubtitle(subtitleId);
+  return { data: buffer };
+}
+
+// Fetch subtitle from SubsSab using native http
+function fetchSubsSab(subtitleId) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'subs.sab.bz',
+      path: `/index.php?act=download&id=${subtitleId}`,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'http://subs.sab.bz',
+        'Accept': '*/*'
+      }
+    };
+
+    let resolved = false;
+    const chunks = [];
+    let responseHeaders = {};
+    let statusCode = 0;
+
+    const req = http.request(options, (response) => {
+      // Handle redirects
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        const redirectUrl = new URL(response.headers.location, 'http://subs.sab.bz');
+        const redirectOptions = {
+          hostname: redirectUrl.hostname,
+          path: redirectUrl.pathname + redirectUrl.search,
+          method: 'GET',
+          headers: options.headers
+        };
+
+        const redirectReq = http.request(redirectOptions, (redirectResponse) => {
+          redirectResponse.on('data', (chunk) => chunks.push(chunk));
+          redirectResponse.on('end', () => {
+            if (!resolved) {
+              resolved = true;
+              resolve({
+                data: Buffer.concat(chunks),
+                headers: redirectResponse.headers,
+                statusCode: redirectResponse.statusCode
+              });
+            }
+          });
+        });
+
+        redirectReq.on('error', (err) => {
+          if (!resolved) {
+            resolved = true;
+            reject(err);
+          }
+        });
+
+        redirectReq.end();
+        return;
+      }
+
+      responseHeaders = response.headers;
+      statusCode = response.statusCode;
+
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        if (!resolved) {
+          resolved = true;
+          resolve({
+            data: Buffer.concat(chunks),
+            headers: responseHeaders,
+            statusCode: statusCode
+          });
+        }
+      });
+
+      response.on('error', (err) => {
+        if (!resolved && chunks.length > 0) {
+          resolved = true;
+          resolve({
+            data: Buffer.concat(chunks),
+            headers: responseHeaders,
+            statusCode: statusCode
+          });
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      if (!resolved) {
+        resolved = true;
+        reject(err);
+      }
+    });
+
+    req.setTimeout(25000, () => {
+      if (!resolved) {
+        req.destroy();
+        resolved = true;
+        reject(new Error('Request timeout'));
+      }
+    });
+
+    req.end();
+  });
+}
+
+// Subtitle proxy endpoint - supports multiple providers
+// URL pattern: /subtitle/:provider/:id.srt
+app.get('/subtitle/:provider/:id.srt', async (req, res) => {
+  const { provider, id: subtitleId } = req.params;
 
   // Validate subtitle ID (must be numeric)
   if (!/^\d+$/.test(subtitleId)) {
     return res.status(400).send('Invalid subtitle ID');
   }
 
-  console.log(`[Proxy] Fetching subtitle ID: ${subtitleId}`);
+  // Validate provider
+  const validProviders = ['subsunacs', 'yavka', 'subsab'];
+  if (!validProviders.includes(provider)) {
+    return res.status(400).send('Invalid provider');
+  }
+
+  console.log(`[Proxy] Fetching subtitle ID: ${subtitleId} from ${provider}`);
 
   try {
-    const response = await fetchSubtitle(subtitleId);
-    const contentType = response.headers['content-type'] || '';
+    let response;
+
+    switch (provider) {
+      case 'subsunacs':
+        response = await fetchSubsunacs(subtitleId);
+        break;
+
+      case 'yavka':
+        response = await fetchYavka(subtitleId);
+        break;
+
+      case 'subsab':
+        response = await fetchSubsSab(subtitleId);
+        break;
+
+      default:
+        return res.status(400).send('Unknown provider');
+    }
+
     const buffer = response.data;
 
-    // Check for ZIP magic bytes (PK)
-    const isZip = buffer.length > 2 && buffer[0] === 0x50 && buffer[1] === 0x4B;
-
-    if (isZip) {
-      try {
-        const zip = new AdmZip(buffer);
-        const zipEntries = zip.getEntries();
-
-        // Find .srt file
-        const srtEntry = zipEntries.find(entry =>
-          !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.srt')
-        );
-
-        if (srtEntry) {
-          const subtitleContent = decodeBulgarian(srtEntry.getData());
-          res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.send(subtitleContent);
-          console.log(`[Proxy] Served subtitle ${subtitleId} from ZIP`);
-          return;
-        }
-
-        // Try .sub file if no .srt found
-        const subEntry = zipEntries.find(entry =>
-          !entry.isDirectory && entry.entryName.toLowerCase().endsWith('.sub')
-        );
-
-        if (subEntry) {
-          const subtitleContent = decodeBulgarian(subEntry.getData());
-          const converted = convertMicroDvdToSrt(subtitleContent);
-          res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.send(converted || subtitleContent);
-          console.log(`[Proxy] Served .sub subtitle ${subtitleId} from ZIP`);
-          return;
-        }
-
-        console.error(`[Proxy] No subtitle file found in ZIP for ${subtitleId}`);
-        res.status(404).send('Subtitle file not found in archive');
-      } catch (zipError) {
-        console.error(`[Proxy] ZIP extraction error:`, zipError.message);
-        // Maybe it's not actually a ZIP, try serving raw
-        const decoded = decodeBulgarian(buffer);
-        const converted = convertMicroDvdToSrt(decoded);
-        res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.send(converted || decoded);
-      }
-    } else {
-      // Serve as plain text (handles raw .srt or .sub files)
-      const decoded = decodeBulgarian(buffer);
-      const converted = convertMicroDvdToSrt(decoded);
-      res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.send(converted || decoded);
-      console.log(`[Proxy] Served subtitle ${subtitleId} directly`);
+    if (!buffer || buffer.length === 0) {
+      console.error(`[Proxy] Empty response from ${provider} for ${subtitleId}`);
+      return res.status(404).send('Subtitle not found');
     }
+
+    const success = processSubtitleBuffer(buffer, res, subtitleId);
+    if (!success) {
+      res.status(404).send('Subtitle file not found in archive');
+    }
+
   } catch (error) {
-    console.error(`[Proxy] Error fetching subtitle ${subtitleId}:`, error.message);
+    console.error(`[Proxy] Error fetching subtitle ${subtitleId} from ${provider}:`, error.message);
     res.status(500).send('Error fetching subtitle');
   }
 });

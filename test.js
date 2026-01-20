@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * Test script for the Subsunacs addon
+ * Test script for the Bulgarian Subtitles addon
+ * Tests all providers: Subsunacs, Yavka, SubsSab
  */
 
 const { getIMDBInfo } = require('./lib/imdb');
-const { searchSubtitles } = require('./lib/subsunacs');
+const { searchAllProviders } = require('./lib/providers');
+const subsunacs = require('./lib/providers/subsunacs');
+const yavka = require('./lib/providers/yavka');
+const subsab = require('./lib/providers/subsab');
 const { parseStremioId } = require('./lib/utils');
 
 async function testIMDB() {
@@ -26,18 +30,75 @@ async function testIMDB() {
 }
 
 async function testSubsunacs() {
-  console.log('\n=== Testing Subsunacs Scraper ===');
+  console.log('\n=== Testing Subsunacs Provider ===');
 
   try {
-    // Test movie search
-    const movieResults = await searchSubtitles('The Matrix', 1999);
-    console.log(`✓ Found ${movieResults.length} subtitles for The Matrix`);
-    if (movieResults.length > 0) {
-      console.log('  First result:', movieResults[0]);
+    const results = await subsunacs.search('The Matrix', 1999);
+    console.log(`✓ Found ${results.length} subtitles`);
+    if (results.length > 0) {
+      console.log('  First result:', {
+        provider: results[0].provider,
+        title: results[0].title,
+        id: results[0].id
+      });
     }
-
   } catch (error) {
     console.error('✗ Subsunacs test failed:', error.message);
+  }
+}
+
+async function testYavka() {
+  console.log('\n=== Testing Yavka Provider ===');
+
+  try {
+    const results = await yavka.search('The Matrix', 1999, null, null, 'tt0133093');
+    console.log(`✓ Found ${results.length} subtitles`);
+    if (results.length > 0) {
+      console.log('  First result:', {
+        provider: results[0].provider,
+        title: results[0].title,
+        id: results[0].id
+      });
+    }
+  } catch (error) {
+    console.error('✗ Yavka test failed:', error.message);
+  }
+}
+
+async function testSubsSab() {
+  console.log('\n=== Testing SubsSab Provider ===');
+
+  try {
+    const results = await subsab.search('The Matrix', 1999, null, null, 'tt0133093');
+    console.log(`✓ Found ${results.length} subtitles`);
+    if (results.length > 0) {
+      console.log('  First result:', {
+        provider: results[0].provider,
+        title: results[0].title,
+        id: results[0].id
+      });
+    }
+  } catch (error) {
+    console.error('✗ SubsSab test failed:', error.message);
+  }
+}
+
+async function testAllProviders() {
+  console.log('\n=== Testing All Providers (Parallel) ===');
+
+  try {
+    const results = await searchAllProviders('The Matrix', 1999, null, null, 'tt0133093');
+    console.log(`✓ Found ${results.length} total subtitles from all providers`);
+
+    // Count by provider
+    const counts = {};
+    for (const result of results) {
+      counts[result.providerName] = (counts[result.providerName] || 0) + 1;
+    }
+    console.log('  Breakdown by provider:', counts);
+
+  } catch (error) {
+    console.error('✗ All providers test failed:', error.message);
   }
 }
 
@@ -54,11 +115,15 @@ async function testUtils() {
 }
 
 async function runTests() {
-  console.log('Starting Subsunacs Addon Tests...\n');
+  console.log('Starting Bulgarian Subtitles Addon Tests...');
+  console.log('Providers: Subsunacs, Yavka, SubsSab\n');
 
   testUtils();
   await testIMDB();
   await testSubsunacs();
+  await testYavka();
+  await testSubsSab();
+  await testAllProviders();
 
   console.log('\n=== Tests Complete ===\n');
 }

@@ -144,8 +144,7 @@ builder.defineSubtitlesHandler(async (args) => {
 
     const subtitles = searchResults.map((result, index) => {
       const id = `subsunacs-${result.id}-${index}`;
-      const directUrl = `${PUBLIC_URL}/subtitle/${result.id}.srt`;
-      const url = `http://127.0.0.1:11470/subtitles.vtt?from=${encodeURIComponent(directUrl)}`;
+      const url = `${PUBLIC_URL}/subtitle/${result.id}.srt`;
 
       let subtitleLabel = result.title;
       if (result.fps) {

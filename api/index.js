@@ -14,6 +14,7 @@ const path = require('path');
 const { getIMDBInfo } = require(path.join(__dirname, '..', 'lib', 'imdb'));
 const { searchSubtitles } = require(path.join(__dirname, '..', 'lib', 'subsunacs'));
 const { parseStremioId } = require(path.join(__dirname, '..', 'lib', 'utils'));
+const { getBaseUrl } = require(path.join(__dirname, '..', 'lib', 'base-url'));
 
 // Create Express app
 const app = express();
@@ -27,19 +28,6 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', '*');
   next();
 });
-
-// Get base URL dynamically
-function getBaseUrl(req) {
-  if (process.env.PUBLIC_URL) {
-    return process.env.PUBLIC_URL;
-  }
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
-  }
-  const protocol = req.headers['x-forwarded-proto'] || 'https';
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
-  return `${protocol}://${host}`;
-}
 
 // Define addon manifest
 const manifest = {

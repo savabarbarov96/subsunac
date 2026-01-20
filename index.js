@@ -14,6 +14,73 @@ const { parseStremioId } = require('./lib/utils');
 const axios = require('axios');
 const AdmZip = require('adm-zip');
 
+function formatSrtTime(totalSeconds) {
+  const totalMs = Math.max(0, Math.round(totalSeconds * 1000));
+  const ms = totalMs % 1000;
+  const totalSecondsInt = Math.floor(totalMs / 1000);
+  const seconds = totalSecondsInt % 60;
+  const totalMinutes = Math.floor(totalSecondsInt / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+
+  const pad2 = (value) => String(value).padStart(2, '0');
+  const pad3 = (value) => String(value).padStart(3, '0');
+
+  return `${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)},${pad3(ms)}`;
+}
+
+function convertMicroDvdToSrt(text) {
+  const lines = text.split(/\r?\n/);
+  let fps = null;
+  const entries = [];
+
+  for (const line of lines) {
+    const match = line.match(/^\{(\d+)\}\{(\d+)\}(.*)$/);
+    if (!match) {
+      continue;
+    }
+
+    const start = parseInt(match[1], 10);
+    const end = parseInt(match[2], 10);
+    const rawText = match[3] || '';
+    const trimmed = rawText.trim();
+
+    if (start === end && /^\d+(?:[.,]\d+)?$/.test(trimmed)) {
+      const parsedFps = parseFloat(trimmed.replace(',', '.'));
+      if (!Number.isNaN(parsedFps) && parsedFps > 0) {
+        fps = parsedFps;
+        continue;
+      }
+    }
+
+    const cleaned = rawText
+      .replace(/\{[^}]*\}/g, '')
+      .replace(/\|/g, '\n')
+      .trim();
+
+    if (!cleaned) {
+      continue;
+    }
+
+    entries.push({ start, end, text: cleaned });
+  }
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  const safeFps = fps && fps > 0 ? fps : 25;
+  let index = 1;
+
+  const output = entries.map((entry) => {
+    const startTime = formatSrtTime(entry.start / safeFps);
+    const endTime = formatSrtTime(entry.end / safeFps);
+    return `${index++}\n${startTime} --> ${endTime}\n${entry.text}\n`;
+  });
+
+  return `${output.join('\n').trim()}\n`;
+}
+
 // Environment configuration
 const PORT = process.env.PORT || 7000;
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
@@ -159,7 +226,7 @@ router.get('/subtitle/:id.srt', async (req, res) => {
 
         if (srtEntry) {
           const subtitleContent = srtEntry.getData().toString('utf8');
-          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.send(subtitleContent);
           console.log(`[Proxy] Served subtitle ${subtitleId} from ZIP`);
@@ -172,9 +239,10 @@ router.get('/subtitle/:id.srt', async (req, res) => {
 
         if (subEntry) {
           const subtitleContent = subEntry.getData().toString('utf8');
-          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          const converted = convertMicroDvdToSrt(subtitleContent);
+          res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
           res.setHeader('Access-Control-Allow-Origin', '*');
-          res.send(subtitleContent);
+          res.send(converted || subtitleContent);
           console.log(`[Proxy] Served .sub subtitle ${subtitleId} from ZIP`);
           return;
         }
@@ -183,14 +251,18 @@ router.get('/subtitle/:id.srt', async (req, res) => {
         res.status(404).send('Subtitle file not found in archive');
       } catch (zipError) {
         console.error(`[Proxy] ZIP extraction error:`, zipError.message);
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        const decoded = buffer.toString('utf8');
+        const converted = convertMicroDvdToSrt(decoded);
+        res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.send(buffer.toString('utf8'));
+        res.send(converted || decoded);
       }
     } else {
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      const decoded = buffer.toString('utf8');
+      const converted = convertMicroDvdToSrt(decoded);
+      res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.send(buffer.toString('utf8'));
+      res.send(converted || decoded);
       console.log(`[Proxy] Served subtitle ${subtitleId} directly`);
     }
   } catch (error) {

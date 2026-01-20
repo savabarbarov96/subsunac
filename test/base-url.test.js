@@ -20,15 +20,8 @@ test('getBaseUrl prefers PUBLIC_URL', () => {
   });
 });
 
-test('getBaseUrl falls back to VERCEL_URL when PUBLIC_URL is missing', () => {
-  withEnv({ PUBLIC_URL: '', VERCEL_URL: 'example.vercel.app' }, () => {
-    const baseUrl = getBaseUrl({ headers: { host: 'ignored.test' } });
-    assert.equal(baseUrl, 'https://example.vercel.app');
-  });
-});
-
-test('getBaseUrl prefers host header over x-forwarded-host', () => {
-  withEnv({ PUBLIC_URL: '', VERCEL_URL: '' }, () => {
+test('getBaseUrl prefers host header over VERCEL_URL', () => {
+  withEnv({ PUBLIC_URL: '', VERCEL_URL: 'preview.vercel.app' }, () => {
     const baseUrl = getBaseUrl({
       headers: {
         host: 'subsunac.vercel.app',
@@ -41,7 +34,7 @@ test('getBaseUrl prefers host header over x-forwarded-host', () => {
 });
 
 test('getBaseUrl uses x-forwarded-host when host is missing', () => {
-  withEnv({ PUBLIC_URL: '', VERCEL_URL: '' }, () => {
+  withEnv({ PUBLIC_URL: '', VERCEL_URL: 'preview.vercel.app' }, () => {
     const baseUrl = getBaseUrl({
       headers: {
         'x-forwarded-host': 'forwarded.example',
@@ -49,5 +42,12 @@ test('getBaseUrl uses x-forwarded-host when host is missing', () => {
       }
     });
     assert.equal(baseUrl, 'https://forwarded.example');
+  });
+});
+
+test('getBaseUrl falls back to VERCEL_URL when host is missing', () => {
+  withEnv({ PUBLIC_URL: '', VERCEL_URL: 'example.vercel.app' }, () => {
+    const baseUrl = getBaseUrl({ headers: {} });
+    assert.equal(baseUrl, 'https://example.vercel.app');
   });
 });

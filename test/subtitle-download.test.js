@@ -35,6 +35,8 @@ test('follows relative redirects and switches from HTTP to HTTPS', async () => {
   assert.equal(result.buffer.toString(), 'real subtitle');
   assert.deepEqual(mock.calls.map(c => c.protocol), ['http', 'http', 'https']);
   assert.equal(mock.calls[2].url, 'https://example.test:8443/file');
+  assert.equal(mock.calls[2].options.agent, false);
+  assert.equal(mock.calls[2].options.headers.Connection, 'close');
 });
 for (const [name, replies, options, status] of [
   ['upstream 404', [{status: 404}], {}, 404],

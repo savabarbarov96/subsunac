@@ -63,7 +63,7 @@ for (const [name, replies, options, status] of [
 
 test('recovers a complete Subsunacs ZIP when trailing bytes trigger its known parser error', async () => {
   const body = zip({'movie.srt': '1\n00:00:01,000 --> 00:00:02,000\nЗдравей\n'});
-  const mock = mockTransports([{body, requestError: 'HPE_INVALID_CONSTANT', complete: false}]);
+  const mock = mockTransports([{body, headers: {'content-length': String(body.length)}, requestError: 'HPE_INVALID_CONSTANT', complete: true}]);
   const result = await requestBuffer('https://subsunacs.net/getentry.php?id=1', {transports: mock.transports});
   assert.deepEqual(result.buffer, body);
 });
@@ -77,3 +77,13 @@ for (const [name, host, body, code] of [
     await assert.rejects(requestBuffer(`https://${host}/file`, {transports: mock.transports}), {status: 502});
   });
 }
+
+test('retains complete raw SRT when Subsunacs appends invalid HTTP bytes', async () => {
+  const body = Buffer.from('1\n00:00:01,000 --> 00:00:02,000\nЗдравей\n');
+  const mock = mockTransports([{body, headers: {'content-length': String(body.length)}, requestError: 'HPE_INVALID_CONSTANT', complete: true}]);
+  assert.deepEqual((await requestBuffer('https://subsunacs.net/getentry.php?id=1', {transports: mock.transports})).buffer, body);
+});
+test('does not recover when received body does not match its declared length', async () => {
+  const mock = mockTransports([{body: 'partial', headers: {'content-length': '100'}, requestError: 'HPE_INVALID_CONSTANT', complete: true}]);
+  await assert.rejects(requestBuffer('https://subsunacs.net/file', {transports: mock.transports}), {status: 502});
+});

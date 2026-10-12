@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const yavka = require('../../lib/providers/yavka');
 
-const SKIP_LIVE = process.env.SKIP_LIVE_TESTS === '1';
+const SKIP_LIVE = process.env.RUN_LIVE_TESTS !== '1' || process.env.SKIP_LIVE_TESTS === '1';
 
 test('yavka provider exports correct constants', () => {
   assert.equal(yavka.PROVIDER, 'yavka');

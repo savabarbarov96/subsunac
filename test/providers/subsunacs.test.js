@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const subsunacs = require('../../lib/providers/subsunacs');
 
-const SKIP_LIVE = process.env.SKIP_LIVE_TESTS === '1';
+const SKIP_LIVE = process.env.RUN_LIVE_TESTS !== '1' || process.env.SKIP_LIVE_TESTS === '1';
 
 test('subsunacs provider exports correct constants', () => {
   assert.equal(subsunacs.PROVIDER, 'subsunacs');

@@ -1,128 +1,55 @@
-# Subsunacs Bulgarian Subtitles - Stremio Addon
+# Bulgarian Subtitles — Stremio addon
 
-A Stremio addon that provides Bulgarian subtitles from [subsunacs.net](https://subsunacs.net/) for movies and TV shows.
+Bulgarian subtitles for movies and series from [Subsunacs](https://subsunacs.net/) and [SubsSab](http://subs.sab.bz/).
 
-## Features
+Install using `https://subsunac.vercel.app/manifest.json`. The addon ID and installation URL stay the same across updates. Yavka remains disabled because its bot protection blocks server-side requests.
 
-- ✅ Search for Bulgarian subtitles from subsunacs.net
-- ✅ Support for both movies and TV series
-- ✅ Automatic IMDB ID to title conversion
-- ✅ Handles Cyrillic encoding automatically
-- ✅ Extracts subtitles from ZIP/RAR archives
-- ✅ Caching for better performance
-- ✅ Shows FPS and uploader information
+## Release 2.0.1
 
-## Installation
+Live checks of The Matrix and Breaking Bad S01E01/S01E02 reproduced the loading problem: SubsSab download URLs returned RAR data decoded as text and labelled SRT. The provider files were available, but the addon did not extract them. Six sampled Subsunacs downloads returned valid SRT; all four sampled SubsSab downloads failed before the repair.
 
-### Prerequisites
+The updated pipeline extracts ZIP and RAR archives in memory, converts MicroDVD subtitles to SRT, decodes Bulgarian Windows-1251/UTF-8/UTF-16 text, and validates subtitle content before returning success. It follows HTTP/HTTPS redirects, bounds downloads and extraction, and keeps generated URLs isolated between requests. Episode URLs carry season and episode parameters to select the correct file in packs.
 
-- Node.js (version 14 or higher)
-- npm
+## Local development
 
-### Setup
+Requires Node.js 20.19 or later (Node.js 22 is used in CI).
 
-1. Install dependencies:
 ```bash
-npm install
-```
-
-2. Start the addon:
-```bash
+npm ci
 npm start
 ```
 
-The addon will start on `http://127.0.0.1:7000`
+Install `http://localhost:7000/manifest.json` in Stremio. Set `PORT` to change the local port or `PUBLIC_URL` to override the URL included in subtitle results. Vercel normally derives this URL from the incoming request.
 
-3. Install in Stremio:
-   - Open Stremio
-   - Go to **Settings** → **Addons**
-   - Enter the URL: `http://127.0.0.1:7000/manifest.json`
-   - Click **Install**
+The local server and `api/index.js` use the same Express application and subtitle pipeline.
 
-## Usage
+## Verification
 
-Once installed, the addon will automatically appear in your Stremio subtitle options when watching movies or TV shows:
-
-1. Start playing any movie or TV show in Stremio
-2. Click the **CC** (subtitles) button
-3. Look for **Bulgarian** subtitles from this addon
-4. Select your preferred subtitle (shows FPS and uploader info)
-
-## How It Works
-
-1. **IMDB Lookup**: Converts Stremio's IMDB ID to movie/series title
-2. **Search**: Queries subsunacs.net for matching subtitles
-3. **Results**: Returns up to 20 subtitle options with metadata
-4. **Download**: Uses Stremio's built-in handler for encoding and archive extraction
-
-## File Structure
-
-```
-subsunac/
-├── index.js              # Main addon server
-├── lib/
-│   ├── imdb.js          # IMDB scraper
-│   ├── subsunacs.js     # Subsunacs.net scraper
-│   └── utils.js         # Utility functions
-├── package.json
-└── README.md
-```
-
-## Caching
-
-The addon uses in-memory caching to improve performance:
-- **IMDB lookups**: Cached for 24 hours
-- **Subtitle searches**: Cached for 1 hour
-
-## Troubleshooting
-
-### No subtitles found
-- Make sure subsunacs.net is accessible
-- Try searching for the movie/show manually on subsunacs.net to verify availability
-- Check console logs for errors
-
-### Encoding issues
-The addon uses Stremio's built-in encoding handler (`http://127.0.0.1:11470/subtitles.vtt?from=`) which automatically detects and converts Cyrillic text.
-
-### Archive extraction issues
-Stremio's local server handles ZIP and RAR extraction automatically. If you encounter issues, the subtitle files might be in an unsupported archive format.
-
-## Development
-
-### Testing
-
-Run the test script to verify components:
 ```bash
-node test.js
+npm test                 # deterministic offline regression tests
+npm run test:live:local  # repaired local code, actual provider downloads
+npm run test:live        # deployed listing and subtitle download checks
 ```
 
-### Debug
+Live tests are opt-in, have request deadlines, and test movie and series results from both active providers. `LIVE_URL` can point deployed checks at a Vercel preview. The local live suite executes Express routes in memory, allowing verification without opening a listening socket. Offline archives contain generated test text, not third-party subtitles.
 
-Run the debug script to inspect subsunacs.net responses:
-```bash
-node debug-subsunacs.js
-```
+## API
 
-This will save the HTML response to `debug-response.html` for inspection.
+- `GET /manifest.json` — Stremio manifest.
+- `GET /health` — application version and active providers; this is not a provider availability check.
+- `GET /subtitles/movie/tt0133093.json` — movie subtitle options.
+- `GET /subtitles/series/tt0903747:1:2.json` — episode subtitle options.
+- `GET /subtitle/:provider/:id.srt` — extracted UTF-8 SRT.
+- Optional `?season=1&episode=2` selects an episode from an archive; existing download paths remain valid.
 
-## API Endpoints
+Download errors return `400` for invalid parameters, `404` for missing files, `502` for invalid provider responses or unsupported/corrupt archives, and `504` for download timeouts. HTML and raw archive bytes are never served as successful SRT. Password-protected and multi-volume RAR archives are unsupported.
 
-When the addon is running, it exposes these endpoints:
+Downloads are limited to 20 MiB and 25 seconds across up to five redirects. Archives allow up to 1,000 files and 50 MiB declared unpacked content; selected subtitle files are limited to 5 MiB. RAR extraction is serialized because the decoder shares a WASM instance. The WASM asset is explicitly included in the Vercel function bundle.
 
-- `GET /manifest.json` - Addon manifest
-- `GET /subtitles/:type/:id.json` - Get subtitles for a movie/series
+## Release checks
 
-Example:
-```bash
-# Get subtitles for The Matrix (tt0133093)
-curl http://127.0.0.1:7000/subtitles/movie/tt0133093.json
-```
+CI runs offline tests and local live provider tests before promotion. Validate a Vercel preview, then deploy the tested commit to the existing production project. Run production live tests after deployment and confirm the manifest reports `2.0.1`. PC/TV playback acceptance is a separate manual check; successful HTTP downloads do not prove device playback or subtitle synchronization.
 
 ## License
 
-ISC
-
-## Credits
-
-- Subtitles provided by [subsunacs.net](https://subsunacs.net/)
-- Built with [Stremio Addon SDK](https://github.com/Stremio/stremio-addon-sdk)
+MIT.

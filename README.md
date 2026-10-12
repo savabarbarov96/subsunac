@@ -44,7 +44,7 @@ Live tests are opt-in, have request deadlines, and test movie and series results
 
 Download errors return `400` for invalid parameters, `404` for missing files, `502` for invalid provider responses or unsupported/corrupt archives, and `504` for download timeouts. HTML and raw archive bytes are never served as successful SRT. Password-protected and multi-volume RAR archives are unsupported.
 
-Downloads are limited to 20 MiB and 25 seconds across up to five redirects. Archives allow up to 1,000 files and 50 MiB declared unpacked content; selected subtitle files are limited to 5 MiB. RAR extraction is serialized because the decoder shares a WASM instance. The WASM asset is explicitly included in the Vercel function bundle.
+Downloads are limited to 20 MiB and 25 seconds across up to five redirects. Archives allow up to 1,000 files and 50 MiB declared unpacked content; selected subtitle files are limited to 5 MiB. The known Subsunacs HTTP framing error is recovered only when a complete ZIP central directory is present; archive extraction and content validation still apply. RAR extraction is serialized because the decoder shares a WASM instance. The WASM asset is explicitly included in the Vercel function bundle.
 
 ## Release checks
 

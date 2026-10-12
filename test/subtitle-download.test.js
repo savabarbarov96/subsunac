@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { requestBuffer } = require('../lib/subtitle-download');
+const { zip } = require('./fixtures/archives');
 
 function mockTransports(replies) {
   const calls = [];
@@ -18,7 +19,11 @@ function mockTransports(replies) {
       response.headers = reply.headers || {};
       response.complete = reply.complete !== false;
       callback(response);
-      if (reply.error) response.destroy(new Error('upstream disconnected'));
+      if (reply.requestError) {
+        response.write(reply.body);
+        req.emit('error', Object.assign(new Error('Malformed provider framing'), {code: reply.requestError}));
+        response.destroy();
+      } else if (reply.error) response.destroy(new Error('upstream disconnected'));
       else response.end(reply.body || 'subtitle');
     });
     return req;
@@ -53,5 +58,22 @@ for (const [name, replies, options, status] of [
   test(`rejects ${name}`, async () => {
     const mock = mockTransports(replies);
     await assert.rejects(requestBuffer('https://example.test/file', {...options, transports: mock.transports}), {status});
+  });
+}
+
+test('recovers a complete Subsunacs ZIP when trailing bytes trigger its known parser error', async () => {
+  const body = zip({'movie.srt': '1\n00:00:01,000 --> 00:00:02,000\nЗдравей\n'});
+  const mock = mockTransports([{body, requestError: 'HPE_INVALID_CONSTANT', complete: false}]);
+  const result = await requestBuffer('https://subsunacs.net/getentry.php?id=1', {transports: mock.transports});
+  assert.deepEqual(result.buffer, body);
+});
+for (const [name, host, body, code] of [
+  ['truncated ZIP', 'subsunacs.net', zip({'a.srt': 'subtitle'}).subarray(0, 20), 'HPE_INVALID_CONSTANT'],
+  ['other provider', 'example.test', zip({'a.srt': 'subtitle'}), 'HPE_INVALID_CONSTANT'],
+  ['other transport error', 'subsunacs.net', zip({'a.srt': 'subtitle'}), 'ECONNRESET']
+]) {
+  test(`does not recover ${name}`, async () => {
+    const mock = mockTransports([{body, requestError: code, complete: false}]);
+    await assert.rejects(requestBuffer(`https://${host}/file`, {transports: mock.transports}), {status: 502});
   });
 }

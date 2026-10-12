@@ -73,3 +73,18 @@ test('installation page displays the same version as the manifest', async t => {
   assert.equal(response.status, 200);
   assert.match(await response.text(), /v2\.0\.1/);
 });
+
+// Exercise the exported production entrypoint, not just the application factory.
+test('Vercel entrypoint exports the app and serves original public paths', async () => {
+  const app = require('../index');
+  for (const path of ['/', '/manifest.json', '/health']) {
+    const response = await requestInMemory(app, path);
+    assert.equal(response.status, 200);
+    if (path === '/') {
+      assert.match(response.headers.get('content-type'), /html/);
+      assert.match(await response.text(), /v2\.0\.1/);
+    } else {
+      assert.equal((await response.json()).version, '2.0.1');
+    }
+  }
+});

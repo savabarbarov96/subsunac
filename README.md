@@ -21,7 +21,7 @@ npm start
 
 Install `http://localhost:7000/manifest.json` in Stremio. Set `PORT` to change the local port or `PUBLIC_URL` to override the URL included in subtitle results. Vercel normally derives this URL from the incoming request.
 
-The local server and `api/index.js` use the same Express application and subtitle pipeline.
+`index.js` exports the Express application for Vercel and starts a listener when run locally. Vercel uses the native Express framework preset without internal rewrites. The compatibility entrypoint `api/index.js` uses the same subtitle pipeline.
 
 ## Verification
 

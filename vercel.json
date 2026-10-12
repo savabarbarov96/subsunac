@@ -1,26 +1,10 @@
 {
   "version": 2,
-  "framework": null,
+  "framework": "express",
   "functions": {
-    "api/index.js": {
+    "index.js": {
       "maxDuration": 60,
       "includeFiles": "node_modules/node-unrar-js/dist/js/unrar.wasm"
     }
-  },
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/api/index.js"
-    }
-  ],
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "*" }
-      ]
-    }
-  ]
+  }
 }

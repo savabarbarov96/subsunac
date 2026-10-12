@@ -66,3 +66,10 @@ test('CORS preflight succeeds without downloading a subtitle', async t => {
   assert.equal(response.status, 204);
   assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*');
 });
+
+test('installation page displays the same version as the manifest', async t => {
+  const request = await withApp(t);
+  const response = await request('/');
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /v2\.0\.1/);
+});

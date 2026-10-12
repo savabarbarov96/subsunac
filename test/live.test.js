@@ -81,3 +81,9 @@ test('live health check returns providers list', { skip: SKIP_LIVE ? 'SKIP_LIVE_
   // Note: yavka is disabled due to Cloudflare protection
   assert.ok(data.providers.includes('subsab'));
 });
+
+test('live installation page displays v2.0.1', {skip: SKIP_LIVE}, async () => {
+  const response = await liveFetch(`${LIVE_URL}/`);
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /v2\.0\.1/);
+});

@@ -12,7 +12,7 @@ The updated pipeline extracts ZIP and RAR archives in memory, converts MicroDVD 
 
 ## Local development
 
-Requires Node.js 20.19 or later (Node.js 22 is used in CI).
+Requires Node.js 22 (the same runtime is used in CI and Vercel).
 
 ```bash
 npm ci
